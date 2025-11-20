@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { User, Message } from '../types';
 
 interface ChatRoomPageProps {
@@ -8,43 +7,61 @@ interface ChatRoomPageProps {
   onLeave: () => void;
 }
 
+// IMPORTANT: Replace this with your own Render.com backend URL
+const WEBSOCKET_URL = 'wss://chithi-plus-backend.onrender.com';
+
 const ChatRoomPage: React.FC<ChatRoomPageProps> = ({ user, pin, onLeave }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
+  const [isConnected, setIsConnected] = useState(false);
+  const ws = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const storageKey = `chithi-room-${pin}`;
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const loadMessages = useCallback(() => {
-    try {
-      const storedMessages = localStorage.getItem(storageKey);
-      if (storedMessages) {
-        setMessages(JSON.parse(storedMessages));
-      }
-    } catch (error) {
-      console.error('Failed to load messages:', error);
-      setMessages([]);
-    }
-  }, [storageKey]);
-
   useEffect(() => {
-    loadMessages();
+    if (!pin || !user) return;
 
-    const handleStorageChange = (event: StorageEvent) => {
-      if (event.key === storageKey) {
-        loadMessages();
+    ws.current = new WebSocket(WEBSOCKET_URL);
+
+    ws.current.onopen = () => {
+      console.log('WebSocket connected');
+      setIsConnected(true);
+      // Join the room
+      ws.current?.send(JSON.stringify({
+        type: 'join',
+        payload: { name: user.name, pin }
+      }));
+    };
+
+    ws.current.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      const { type, payload } = message;
+
+      if (type === 'history') {
+        setMessages(payload);
+      } else if (type === 'message') {
+        setMessages((prevMessages) => [...prevMessages, payload]);
       }
     };
 
-    window.addEventListener('storage', handleStorageChange);
-
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
+    ws.current.onclose = () => {
+      console.log('WebSocket disconnected');
+      setIsConnected(false);
     };
-  }, [storageKey, loadMessages]);
+
+    ws.current.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      setIsConnected(false);
+    };
+
+    // Cleanup on component unmount
+    return () => {
+      ws.current?.close();
+    };
+  }, [pin, user]);
 
   useEffect(() => {
     scrollToBottom();
@@ -52,7 +69,7 @@ const ChatRoomPage: React.FC<ChatRoomPageProps> = ({ user, pin, onLeave }) => {
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    if (newMessage.trim() === '') return;
+    if (newMessage.trim() === '' || !ws.current || ws.current.readyState !== WebSocket.OPEN) return;
 
     const message: Message = {
       id: `${Date.now()}-${user.name}`,
@@ -61,9 +78,7 @@ const ChatRoomPage: React.FC<ChatRoomPageProps> = ({ user, pin, onLeave }) => {
       timestamp: Date.now(),
     };
 
-    const updatedMessages = [...messages, message];
-    setMessages(updatedMessages);
-    localStorage.setItem(storageKey, JSON.stringify(updatedMessages));
+    ws.current.send(JSON.stringify({ type: 'message', payload: message }));
     setNewMessage('');
   };
 
@@ -72,7 +87,10 @@ const ChatRoomPage: React.FC<ChatRoomPageProps> = ({ user, pin, onLeave }) => {
       <header className="flex items-center justify-between p-4 bg-gray-900 border-b border-gray-700">
         <div>
           <h2 className="text-xl font-bold text-teal-400">Room: {pin}</h2>
-          <p className="text-sm text-gray-400">Logged in as: {user.name}</p>
+           <div className="flex items-center space-x-2">
+            <span className={`h-2.5 w-2.5 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></span>
+            <p className="text-sm text-gray-400">{isConnected ? 'Connected' : 'Connecting...'}</p>
+          </div>
         </div>
         <button
           onClick={onLeave}
@@ -120,13 +138,15 @@ const ChatRoomPage: React.FC<ChatRoomPageProps> = ({ user, pin, onLeave }) => {
             onChange={(e) => setNewMessage(e.target.value)}
             placeholder="Type a message..."
             className="flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-full text-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+            disabled={!isConnected}
           />
           <button
             type="submit"
-            className="bg-teal-500 hover:bg-teal-600 text-white font-bold p-3 rounded-full transition duration-300 flex items-center justify-center"
+            className="bg-teal-500 hover:bg-teal-600 text-white font-bold p-3 rounded-full transition duration-300 flex items-center justify-center disabled:bg-gray-600 disabled:cursor-not-allowed"
+            disabled={!isConnected}
           >
              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
              </svg>
           </button>
         </form>
