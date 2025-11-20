@@ -1,0 +1,5 @@
+{
+  "name": "Chithi+",
+  "description": "A simple and anonymous real-time messaging application. Users can create or join chat rooms using a name and a 4-digit PIN to communicate with others who have the same PIN.",
+  "requestFramePermissions": []
+}
